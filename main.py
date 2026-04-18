@@ -5,6 +5,16 @@ import pandas as pd
 # Page configuration
 st.set_page_config(page_title="Stock Comparison Tool", page_icon="📈", layout="wide")
 
+# --- CACHE LOGIC ---
+# This prevents "Too Many Requests" errors by saving data in memory
+@st.cache_data(ttl=3600)
+def get_stock_data(ticker):
+    try:
+        data = yf.Ticker(ticker)
+        return data.info, data.history(period="1y")['Close']
+    except:
+        return None, None
+
 st.title("📈 Global Stock Comparison Dashboard")
 st.markdown("Enter two stock tickers to compare their performance and fundamentals side-by-side.")
 
@@ -17,19 +27,15 @@ with col_input2:
     ticker2 = st.text_input("Second Ticker (e.g., MSFT)", "MSFT").upper()
 
 if ticker1 and ticker2:
-    try:
-        # Fetching data for both
-        with st.spinner('Comparing data...'):
-            data1 = yf.Ticker(ticker1)
-            data2 = yf.Ticker(ticker2)
-            
-            info1 = data1.info
-            info2 = data2.info
-
+    # Fetching data using the cached function
+    with st.spinner('Retrieving global market data...'):
+        info1, hist1 = get_stock_data(ticker1)
+        info2, hist2 = get_stock_data(ticker2)
+        
+        if info1 and info2 and 'longName' in info1 and 'longName' in info2:
             # --- FUNDAMENTALS COMPARISON ---
             st.subheader("Fundamental Comparison")
             
-            # Creating a comparison table
             comparison_df = pd.DataFrame({
                 "Metric": ["Company Name", "Sector", "Total Revenue", "Net Income", "Revenue Growth"],
                 f"{ticker1}": [
@@ -37,41 +43,27 @@ if ticker1 and ticker2:
                     info1.get('sector'),
                     f"${info1.get('totalRevenue', 0):,.0f}",
                     f"${info1.get('netIncomeToCommon', 0):,.0f}",
-                    f"{info1.get('revenueGrowth', 0)*100:.2f}%"
+                    f"{info1.get('revenueGrowth', 0)*100:.2f}%" if info1.get('revenueGrowth') else "N/A"
                 ],
                 f"{ticker2}": [
                     info2.get('longName'), 
                     info2.get('sector'),
                     f"${info2.get('totalRevenue', 0):,.0f}",
                     f"${info2.get('netIncomeToCommon', 0):,.0f}",
-                    f"{info2.get('revenueGrowth', 0)*100:.2f}%"
+                    f"{info2.get('revenueGrowth', 0)*100:.2f}%" if info2.get('revenueGrowth') else "N/A"
                 ]
             })
             st.table(comparison_df)
 
             # --- CHART COMPARISON ---
             st.write("---")
-            st.subheader("Price Performance (Last 12 Months)")
+            st.subheader("Normalized Performance (Last 12 Months)")
             
-            # Fetching historical data
-            hist1 = data1.history(period="1y")['Close']
-            hist2 = data2.history(period="1y")['Close']
-            
-            # Normalizing data to compare growth (%) instead of raw price
-            # This is important if one stock is $100 and the other is $3000
+            # Normalizing data to 100 for fair comparison
             norm1 = (hist1 / hist1.iloc[0]) * 100
             norm2 = (hist2 / hist2.iloc[0]) * 100
             
-            chart_data = pd.DataFrame({
-                ticker1: norm1,
-                ticker2: norm2
-            })
-            
+            chart_data = pd.DataFrame({ticker1: norm1, ticker2: norm2})
             st.line_chart(chart_data)
-            st.caption("Data normalized to 100 (percentage growth) for a fair comparison.")
-
-    except Exception as e:
-        st.error(f"Error: Make sure the tickers are correct. Details: {e}")
-
-else:
-    st.info("Please enter both tickers to see the comparison.")
+        else:
+            st.error("Wait a moment or check if the tickers are valid. Yahoo Finance is currently limiting requests.")
